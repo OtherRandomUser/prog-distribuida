@@ -48,7 +48,7 @@ int main(int argc, char **argv)
     // }
 
     // int filter_size = atoi(argv[3]);
-    int filter_size = 3;
+    int filter_size = 7;
 
     if (filter_size > 15)
     {
@@ -64,24 +64,35 @@ int main(int argc, char **argv)
 
     MPI_Init(&argc, &argv);
 
-    int id;
+    printf("passou!\n");
+
+    int id, np;
     MPI_Comm_rank(MPI_COMM_WORLD, &id);
 
-    int np;
     MPI_Comm_size(MPI_COMM_WORLD, &np);
 
     struct Image *image = NULL;
     struct BGR *out_buff = NULL;
 
-    if (id == 0)
-    {
-        image = bmp_from_file("res/borboleta.bmp");
+    printf("id: %d\n", id);
+
+    if (id == 0) {
+        image = bmp_from_file("res/borboleta.bmp");    
         out_buff = (struct BGR*) malloc(sizeof(struct BGR) * image->buffer_size);
     }
+    else {
+        image = (struct Image *)malloc(sizeof(struct Image));        
+    }
 
-    // broadcast image
+    // broadcast image    
     MPI_Bcast(image, sizeof(struct Image), MPI_CHAR, 0, MPI_COMM_WORLD);
+    if(id != 0) 
+        image->buffer = (struct BGR *)malloc(sizeof(struct BGR) * image->buffer_size);
+
+    //printf("id: %d buffer: %p", id, image->buffer);
+
     MPI_Bcast(image->buffer, image->buffer_size * sizeof(struct BGR), MPI_CHAR, 0, MPI_COMM_WORLD);
+    
     struct Image *output = copy_bmp(image);
 
     // apply filter
@@ -98,6 +109,9 @@ int main(int argc, char **argv)
 
     int chunk_end = chunk_start + chunk_size;
     chunk_end = chunk_end <= height ? chunk_end : height;
+
+    printf("id: %d, chunk_start: %d, chunk_end: %d\n",id,chunk_start,chunk_end);
+    int cont=0;
 
     for (int i = chunk_start; i <  chunk_end; i++)
     {
@@ -129,6 +143,17 @@ int main(int argc, char **argv)
             sort_buffer(filter_buffer_blue, 0, filter_offset - 1);
 
             struct BGR *pixel = acc(output, i, j);
+            // if (id == 0) {
+            //     pixel->red = 255;
+            //     pixel->green = 0;
+            //     pixel->blue  = 0;
+            // }
+            // else {
+            //     cont++;
+            //     pixel->red = 0;
+            //     pixel->green = 0;
+            //     pixel->blue  = 255;
+            // }
             pixel->red = filter_buffer_red[mean_offset];
             pixel->green = filter_buffer_green[mean_offset];
             pixel->blue = filter_buffer_blue[mean_offset];
@@ -139,6 +164,8 @@ int main(int argc, char **argv)
     struct BGR *out_chunk_start =
         output->buffer + chunk_start * width * sizeof(struct BGR);
     int out_chunk_size = (chunk_end - chunk_start) * width * sizeof(struct BGR);
+
+    printf("out_chunk_size: %d\n", out_chunk_size);
 
     MPI_Gather(
         // send
@@ -156,11 +183,45 @@ int main(int argc, char **argv)
         MPI_COMM_WORLD
     );
 
+    // MPI_Gather(
+    //     // send
+    //     output->buffer,
+    //     out_chunk_size,
+    //     MPI_CHAR,
+
+    //     // recv
+    //     output->buffer,
+    //     out_chunk_size,
+    //     MPI_CHAR,
+
+    //     // root
+    //     0,
+    //     MPI_COMM_WORLD
+    // );
+
+    // if (id != 0)
+    // {
+    //     printf("cont: %d\n", cont);
+    //     printf("pixel: %d\n", output->buffer->red);
+    //     printf("pixel: %d\n",(output->buffer + output->buffer_size - 1)->blue);
+    //     bmp_to_file("out/1.bmp", output);
+    // }    
+    // else {
+    //     bmp_to_file("out/2.bmp", output);
+    // }
+
     if (id == 0)
     {
+        printf("pixel: %d\n", out_buff->red);
+        printf("pixel: %d\n",(out_buff + output->buffer_size)->blue);
+
+        printf("output->buffer_size: %d\n", output->buffer_size);
         memcpy(output->buffer, out_buff, output->buffer_size);
-        bmp_to_file("out/borboleta3x3.bmp", output);
+        bmp_to_file("out/teste.bmp", output);
     }
+
+    MPI_Finalize();
 
     return EXIT_SUCCESS;
 }
+
