@@ -40,15 +40,20 @@ void sort_buffer(unsigned char *buffer, int low, int high)
 
 int main(int argc, char **argv)
 {
-    // if (argc != 5)
-    // {
-    //     printf("usage: %s <source-image> <destination-image> "
-    //         "<filter-size> <num-threads>\n", argv[0]);
-    //     return EXIT_FAILURE;
-    // }
+    MPI_Init(&argc, &argv);
 
-    // int filter_size = atoi(argv[3]);
-    int filter_size = 7;
+    int id, np;
+    MPI_Comm_rank(MPI_COMM_WORLD, &id);
+    MPI_Comm_size(MPI_COMM_WORLD, &np);
+
+    if (id == 0 && argc != 4)
+    {
+        printf("usage: %s <source-image> <destination-image> "
+            "<filter-size>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    int filter_size = atoi(argv[3]);
 
     if (filter_size > 15)
     {
@@ -62,37 +67,29 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    MPI_Init(&argc, &argv);
-
-    printf("passou!\n");
-
-    int id, np;
-    MPI_Comm_rank(MPI_COMM_WORLD, &id);
-
-    MPI_Comm_size(MPI_COMM_WORLD, &np);
-
     struct Image *image = NULL;
     struct BGR *out_buff = NULL;
 
-    printf("id: %d\n", id);
-
-    if (id == 0) {
-        image = bmp_from_file("res/borboleta.bmp");    
+    if (id == 0)
+    {
+        image = bmp_from_file(argv[1]);
         out_buff = (struct BGR*) malloc(sizeof(struct BGR) * image->buffer_size);
     }
-    else {
-        image = (struct Image *)malloc(sizeof(struct Image));        
+    else
+    {
+        image = (struct Image*) malloc(sizeof(struct Image));
     }
 
-    // broadcast image    
+    // broadcast image
     MPI_Bcast(image, sizeof(struct Image), MPI_CHAR, 0, MPI_COMM_WORLD);
-    if(id != 0) 
-        image->buffer = (struct BGR *)malloc(sizeof(struct BGR) * image->buffer_size);
 
-    //printf("id: %d buffer: %p", id, image->buffer);
+    if (id != 0)
+    {
+        image->buffer = (struct BGR*) malloc(sizeof(struct BGR) * image->buffer_size);
+    }
 
     MPI_Bcast(image->buffer, image->buffer_size * sizeof(struct BGR), MPI_CHAR, 0, MPI_COMM_WORLD);
-    
+
     struct Image *output = copy_bmp(image);
 
     // apply filter
@@ -110,10 +107,7 @@ int main(int argc, char **argv)
     int chunk_end = chunk_start + chunk_size;
     chunk_end = chunk_end <= height ? chunk_end : height;
 
-    printf("id: %d, chunk_start: %d, chunk_end: %d\n",id,chunk_start,chunk_end);
-    int cont=0;
-
-    for (int i = chunk_start; i <  chunk_end; i++)
+    for (int i = chunk_start; i < chunk_end; i++)
     {
         for (int j = 0; j < width; j++)
         {
@@ -143,81 +137,35 @@ int main(int argc, char **argv)
             sort_buffer(filter_buffer_blue, 0, filter_offset - 1);
 
             struct BGR *pixel = acc(output, i, j);
-            // if (id == 0) {
-            //     pixel->red = 255;
-            //     pixel->green = 0;
-            //     pixel->blue  = 0;
-            // }
-            // else {
-            //     cont++;
-            //     pixel->red = 0;
-            //     pixel->green = 0;
-            //     pixel->blue  = 255;
-            // }
             pixel->red = filter_buffer_red[mean_offset];
             pixel->green = filter_buffer_green[mean_offset];
             pixel->blue = filter_buffer_blue[mean_offset];
         }
     }
 
-    // gather result
-    struct BGR *out_chunk_start =
-        output->buffer + chunk_start * width * sizeof(struct BGR);
-    int out_chunk_size = (chunk_end - chunk_start) * width * sizeof(struct BGR);
-
-    printf("out_chunk_size: %d\n", out_chunk_size);
+    int start_offset = chunk_start * output->width;
+    void *sendbuf = output->buffer + start_offset;
+    int send_count = chunk_size * output->width * sizeof(struct BGR);
 
     MPI_Gather(
         // send
-        out_chunk_start,
-        out_chunk_size,
-        MPI_CHAR,
+        sendbuf,
+        send_count,
+        MPI_BYTE,
 
         // recv
-        out_buff,
-        out_chunk_size,
-        MPI_CHAR,
+        image->buffer,
+        send_count,
+        MPI_BYTE,
 
         // root
         0,
         MPI_COMM_WORLD
     );
 
-    // MPI_Gather(
-    //     // send
-    //     output->buffer,
-    //     out_chunk_size,
-    //     MPI_CHAR,
-
-    //     // recv
-    //     output->buffer,
-    //     out_chunk_size,
-    //     MPI_CHAR,
-
-    //     // root
-    //     0,
-    //     MPI_COMM_WORLD
-    // );
-
-    // if (id != 0)
-    // {
-    //     printf("cont: %d\n", cont);
-    //     printf("pixel: %d\n", output->buffer->red);
-    //     printf("pixel: %d\n",(output->buffer + output->buffer_size - 1)->blue);
-    //     bmp_to_file("out/1.bmp", output);
-    // }    
-    // else {
-    //     bmp_to_file("out/2.bmp", output);
-    // }
-
     if (id == 0)
     {
-        printf("pixel: %d\n", out_buff->red);
-        printf("pixel: %d\n",(out_buff + output->buffer_size)->blue);
-
-        printf("output->buffer_size: %d\n", output->buffer_size);
-        memcpy(output->buffer, out_buff, output->buffer_size);
-        bmp_to_file("out/teste.bmp", output);
+        bmp_to_file(argv[2], image);
     }
 
     MPI_Finalize();

@@ -57,7 +57,6 @@ struct Image* copy_bmp(struct Image *image)
     out->height = image->height;
     out->buffer_size = image->buffer_size;
     out->buffer = (struct BGR*) malloc(sizeof(struct BGR) * image->buffer_size);
-    printf("Tamanho daaaaa imagem: %u\n", image->buffer_size);
     memcpy(out->buffer, image->buffer, sizeof(struct BGR) * image->buffer_size);
     return out;
 }
